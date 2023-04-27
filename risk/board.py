@@ -1,11 +1,13 @@
 import os
 import random
 from collections import namedtuple
-
+from collections import deque
+import copy
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.path import Path
-
+from heapdict import heapdict
 import risk.definitions
 
 Territory = namedtuple('Territory', ['territory_id', 'player_id', 'armies'])
@@ -111,7 +113,18 @@ class Board(object):
         Returns:
             bool: True if the input path is valid
         '''
-
+        print(path)
+        if len(path) < 2:
+            return True
+        for i in range(len(path) - 1):
+            V = path[i]
+            W = path[i+1]
+            neighbor_list = [t.territory_id for t in self.neighbors(V)]
+            if W not in neighbor_list:
+                return False
+            if V in path[i+1:]:
+                return False
+        return True
     
     def is_valid_attack_path(self, path):
         '''
@@ -130,6 +143,13 @@ class Board(object):
         Returns:
             bool: True if the path is an attack path
         '''
+        if len(path) < 2:
+            return False
+        player = self.owner(path[0])
+        for tid in path[1:]:
+            if self.owner(tid) == player:
+                return False
+        return self.is_valid_path(path)
 
 
     def cost_of_attack_path(self, path):
@@ -143,6 +163,8 @@ class Board(object):
         Returns:
             bool: the number of enemy armies in the path
         '''
+        armies = [self.data[tid].armies for tid in path[1:]]
+        return sum(armies)
 
 
     def shortest_path(self, source, target):
@@ -161,6 +183,29 @@ class Board(object):
         Returns:
             [int]: a valid path between source and target that has minimum length; this path is guaranteed to exist
         '''
+        stack1 = [source]
+        queue1 = deque()
+        queue1.append(stack1)
+        #enqueue the stack onto the queue
+        visited_territories = {source}
+        while len(queue1):
+            current_stack = queue1.popleft()
+            current_territory = current_stack[-1]
+            #dequeue a stack from the queue
+            print('while', current_stack)
+            if current_territory == target:
+                return current_stack
+            all_neighbors = self.neighbors(current_territory)
+            all_neighbor_ids = [t.territory_id for t in all_neighbors]
+            print('all neighbors', all_neighbor_ids)
+            new_neighbor_ids = [tid for tid in all_neighbor_ids if tid not in visited_territories]
+            print('new neighbors', new_neighbor_ids)
+            for territory in new_neighbor_ids:
+                copy1 = copy.copy(current_stack)
+                copy1.append(territory)
+                queue1.append(copy1)
+            visited_territories.add(current_territory)
+
 
 
     def can_fortify(self, source, target):
@@ -177,6 +222,30 @@ class Board(object):
             bool: True if reinforcing the target from the source territory is a valid move
         '''
 
+        stack1 = [source]
+        queue1 = deque()
+        queue1.append(stack1)
+        #enqueue the stack onto the queue
+        visited_territories = {source}
+        while len(queue1):
+            current_stack = queue1.popleft()
+            current_territory = current_stack[-1]
+            #dequeue a stack from the queue
+            print('while', current_stack)
+            if current_territory == target:
+                return True
+            all_neighbors = self.friendly_neighbors(current_territory)
+            all_neighbor_ids = [t.territory_id for t in all_neighbors]
+            print('all neighbors', all_neighbor_ids)
+            new_neighbor_ids = [tid for tid in all_neighbor_ids if tid not in visited_territories]
+            print('new neighbors', new_neighbor_ids)
+            for territory in new_neighbor_ids:
+                copy1 = copy.copy(current_stack)
+                copy1.append(territory)
+                queue1.append(copy1)
+            visited_territories.add(current_territory)
+        return False
+
 
     def cheapest_attack_path(self, source, target):
         '''
@@ -191,7 +260,36 @@ class Board(object):
         Returns:
             [int]: a list of territory_ids representing the valid attack path; if no path exists, then it returns None instead
         '''
-
+        if source == target:
+            return
+        dict1 = dict()
+        dict1[source] = [source]
+        heapdict1 = heapdict() 
+        heapdict1[source] = 0
+        visited_territories = {source}
+        while len(heapdict1.keys()):
+            (current_territory, current_priority) = heapdict1.popitem() 
+            print('current territory', current_territory)
+            if current_territory == target:
+                return dict1[current_territory]
+            all_neighbors = self.neighbors(current_territory)
+            all_neighbor_ids = [t.territory_id for t in all_neighbors]
+            print('all neighbors', all_neighbor_ids)
+            all_attackable_neighbors = [tid for tid in all_neighbor_ids if self.owner(tid) != self.owner(source)]
+            new_neighbor_ids = [tid for tid in all_attackable_neighbors if tid not in visited_territories]
+            print('new neighbors', new_neighbor_ids)
+            for territory in new_neighbor_ids:
+                copy1 = copy.copy(dict1[current_territory])
+                copy1.append(territory)
+                priority = current_priority + self.armies(territory)
+                if territory not in heapdict1.keys():
+                    dict1[territory] = copy1
+                    heapdict1[territory] = priority
+                else:
+                    if priority < heapdict1[territory]:
+                        dict1[territory] = copy1
+                        heapdict1[territory] = priority
+            visited_territories.add(current_territory)
 
     def can_attack(self, source, target):
         '''
@@ -202,6 +300,38 @@ class Board(object):
         Returns:
             bool: True if a valid attack path exists between source and target; else False
         '''
+        if source == target:
+            return False
+        
+        stack1 = [source]
+        queue1 = deque()
+        #enqueue the stack onto the queue
+        visited_territories = {source}
+        all_neighbors = self.hostile_neighbors(source)
+        all_neighbor_ids = [t.territory_id for t in all_neighbors]
+        for territory in all_neighbor_ids:
+            copy1 = copy.copy(stack1)
+            copy1.append(territory)
+            queue1.append(copy1)
+        visited_territories.add(source)
+        while len(queue1):
+            current_stack = queue1.popleft()
+            current_territory = current_stack[-1]
+            #dequeue a stack from the queue
+            print('while', current_stack)
+            if current_territory == target:
+                return True 
+            all_neighbors = self.neighbors(current_territory)
+            all_neighbor_ids = [t.territory_id for t in all_neighbors]
+            enemy_neighbor_ids = [tid for tid in all_neighbor_ids if self.owner(tid) != self.owner(source)]
+            print('all neighbors', all_neighbor_ids)
+            new_neighbor_ids = [tid for tid in enemy_neighbor_ids if tid not in visited_territories]
+            print('new neighbors', new_neighbor_ids)
+            for territory in new_neighbor_ids:
+                copy1 = copy.copy(current_stack)
+                copy1.append(territory)
+                queue1.append(copy1)
+            visited_territories.add(current_territory)
 
 
     # ======================= #
